@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>traffic_runner</name>
+  <version>0.1.0</version>
+  <description>
+    MORAI 시뮬레이터 신호등 인지 AI 학습 데이터셋 자동 수집 시나리오 러너.
+    지점(시작점/끝점/경로) 캡처, 신호 상태 연출, 객체 배치, 환경(날씨/시간) 순회,
+    pure pursuit 주행, 이미지+라벨 저장을 담당한다.
+  </description>
+
+  <maintainer email="inha.aim.01@gmail.com">jang</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>morai_msgs</depend>
+
+  <exec_depend>cv_bridge</exec_depend>
+</package>

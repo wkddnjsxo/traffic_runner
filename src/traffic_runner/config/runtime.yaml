@@ -1,0 +1,106 @@
+# traffic_runner 런타임 설정
+# 신호등 인지 AI 학습 데이터셋 자동 수집용.
+
+grpc:
+  # MORAI 는 Windows, 이 러너는 WSL Ubuntu 에서 도는 것을 가정.
+  # host 는 WSL 에서 바라본 Windows 호스트 IP. 본인 환경에서 반드시 확인할 것.
+  #   (WSL 셸에서)  ip route | grep default   → 그 IP
+  host: 192.168.80.1
+  port: 7789
+  client_key: traffic_runner
+
+morai:
+  # MORAI 시뮬레이터 서버가 부르는 실제 맵 이름.
+  # 주의: infor 폴더명은 'PG' 지만 시뮬 서버 맵 이름은 'PR' 이다 (auto_ws 에서 확인된 사항).
+  map_name: R_KR_PR_K-city_2025
+  ego_vehicle_model: 2023_Hyundai_Ioniq5
+
+  # ★ MORAI 의 ego 좌표는 '뒷축 중심' 기준이다. 앞범퍼는 이만큼 앞에 있다.
+  #   휠베이스 3.000 + 프론트 오버행 0.845 = 3.845
+  #   (gRPC get_vehicle_spec 으로 실측: length 4.635 / wheel_base 3.000 /
+  #    front_overhang 0.845 / rear_overhang 0.790)
+  # 이 값을 안 쓰면 좌표상으론 끝점 앞에 섰는데 차체는 정지선을 3m 넘어간다.
+  ego_front_from_origin_m: 3.845
+
+paths:
+  # 이 파일 기준 상대경로. MORAI gRPC SDK(api/, proto/) 위치.
+  grpc_src: ../../../../auto_ws/src/auto_scenario_runner/grpc_inha_univ/src
+  # MGeo 데이터 (검수/시각화용, 캡처 자체엔 불필요)
+  mgeo_dir: ../../../../auto_ws/infor/R_KR_PG_K-city_2025
+
+ros:
+  ego_topic: /Ego_topic                  # morai_msgs/EgoVehicleStatus
+  image_topic: /image_jpeg/compressed    # sensor_msgs/CompressedImage
+  ctrl_topic: /ctrl_cmd                  # morai_msgs/CtrlCmd
+  set_traffic_light_topic: /SetTrafficLight   # morai_msgs/SetTrafficLight
+
+capture:
+  # 지점 캡처 시 ego pose 를 어디서 읽을지. grpc = 실행중인 시뮬에 attach(기본).
+  pose_source: grpc
+  poll_hz: 20.0
+  # 경로점 기록 간격. 이 거리만큼 움직일 때마다 점을 하나 남긴다.
+  interval_m: 0.5
+  # 커브에서 점이 성겨지지 않게, 방향이 이만큼 꺾이면 거리와 무관하게 점을 남긴다.
+  yaw_interval_deg: 5.0
+  # 이보다 짧은 경로는 저장 전에 경고한다.
+  min_length_m: 10.0
+  # 주행 시 끝점 도달로 인정할 반경. spot YAML 에 그대로 기록된다.
+  arrival_radius_m: 3.0
+
+collect:
+  # 수집 매트릭스 (지점 목록 요약에서 총 주행 횟수 계산에 쓰인다)
+  weathers: [SUNNY, FOGGY]
+  hours: [11, 13, 15]
+  # 객체 설정 가짓수. seed 0 = 객체 없음. 신호 상태와 독립인 바깥 루프다.
+  object_seeds: 3
+  # 신호 상태 순서를 매 (환경, 지점, 객체seed) 마다 섞을지
+  shuffle_states: true
+  random_seed: null
+
+  # 신호등까지 이 거리 안에 들어와야 프레임을 저장한다 (m).
+  # 더 멀면 신호등이 몇 픽셀밖에 안 되어 사람도 색을 구분 못 하는데, 거기에
+  # 라벨이 붙으면 모델이 신호등이 아니라 배경·도로 모양을 보고 맞히는 법을 배운다.
+  #   참고(1280px, HFOV 65°): 램프 지름 0.3m -> 70m 에서 4.3px, 50m 에서 6.0px,
+  #   30m 에서 10.0px. 224px 로 리사이즈하면 각각 0.75 / 1.05 / 1.76px.
+  # unknown 지점은 신호등이 없으므로 이 값과 무관하게 전부 저장한다.
+  # 0 또는 null 이면 거리 제한 없이 전부 저장.
+  save_from_m: 70.0
+
+  # 반대로 신호등이 이보다 가까워지면 저장을 멈춘다 (m, 뒷축 기준).
+  #
+  # 카메라가 위로 20° 기울어 있고 세로 화각이 51.1° 라 앙각 45.5° 위는 화면 밖이다.
+  # 신호등 높이 5m 기준 카메라가 3.73m 안쪽이면 프레임을 벗어난다.
+  # 카메라는 뒷축보다 1.90m 앞에 있으므로 뒷축 기준으로는 3.73+1.90 = 5.63m.
+  #
+  # 실측(뒷축 기준): 8.1m 완벽 / 5.0m 상단에 걸침 / 1.5m 신호등이 아예 없고
+  # 보행자 신호(초록)만 보임 — 그런 프레임에 red 라벨이 붙으면 학습이 망가진다.
+  #
+  # 0 이면 제한 없음. 다만 차가 뒷축 4.14m 지점에 서므로, 끄면 신호등이 안 보이는
+  # 프레임이 주행당 약 7장 섞인다.
+  save_until_m: 0
+
+  # 앞범퍼가 끝점(정지선)에서 이만큼 앞에 서도록 한다 (m).
+  # 도달 반경은 여기서 자동 계산된다:
+  #   arrival_radius = ego_front_from_origin_m + stop_gap_m + 제동 여유(0.2)
+  stop_gap_m: 0.5
+
+objects:
+  # 객체는 '끝점 너머' 에만 놓는다. ego 는 시작점~끝점만 주행하므로 충돌하지 않고,
+  # 카메라 정면(신호등 주변)에는 잡힌다.
+  # 끝점에서 이 범위 안에만 배치한다. 멀면 화면에서 작아져 효과가 없고,
+  # 가까우면 ego 가 끝점에서 들이받는다.
+  min_ahead_m: 5.0
+  max_ahead_m: 25.0
+  # 끝점과 '같은 차선' 에 놓는다. 아래 값은 차선 안에서의 미세 흔들림 정도다.
+  # 차선 폭(±3.5)을 주면 옆 차선으로 밀려나 화각 가장자리로 빠진다.
+  lateral_offsets_m: [-0.6, 0.0, 0.6]
+  # 한 seed 당 객체 구성: 같은 차선 1개 + 반대차선 1개 = 총 2개
+  same_lane_objects: 1
+  opposite_lane_objects: 1
+  # 객체끼리 최소 간격
+  min_gap_m: 5.0
+  # 끝점 진행방향 기준 횡방향 허용 범위. 끝점 직후 도로가 꺾이는 지점에서
+  # 객체가 화각 밖으로 벗어나는 것을 막는다.
+  max_lateral_m: 2.5
+  # 반대차선은 애초에 옆으로 떨어져 있으므로 허용 폭이 따로 필요하다
+  max_lateral_opposite_m: 20.0

@@ -1,0 +1,18 @@
+{
+  "data": "/workspace/dataset",
+  "out": "/workspace/train/runs",
+  "epochs": 5,
+  "batch": 48,
+  "lr": 0.0002,
+  "weight_decay": 0.0001,
+  "size": 384,
+  "workers": 8,
+  "val_ratio": 0.2,
+  "seed": 42,
+  "max_dist": null,
+  "min_dist": null,
+  "holdout_spots": null,
+  "no_pretrained": false,
+  "no_class_weights": false,
+  "compile": false
+}

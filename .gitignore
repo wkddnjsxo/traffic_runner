@@ -1,0 +1,50 @@
+# ── 데이터셋 (11GB, GitHub 불가) ──────────────────────────────
+# 코드로 재수집하는 구조라 레포엔 안 넣는다. 수집법은 README 참고.
+dataset/
+
+# ── catkin 빌드 산출물 (재생성됨) ─────────────────────────────
+build/
+devel/
+logs/
+.catkin_workspace
+*.catkin
+
+# ── 학습 산출물 ───────────────────────────────────────────────
+# best.pt 는 예외로 포함(아래 !). last.pt / 리포트 등 나머지는 제외.
+train/runs/**/last.pt
+train/runs/**/*.tmp
+!train/runs/**/best.pt
+!train/runs/**/args.json
+!train/runs/**/report_weather_dist.txt
+
+# ── Python 캐시 ───────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# ── 매니페스트 백업 (혹시 dataset/ 밖에 생겨도) ──────────────
+*.csv.bak
+*.csv.bak2
+
+# ── WSL / OS 잔재 ─────────────────────────────────────────────
+*:Zone.Identifier
+.DS_Store
+Thumbs.db
+
+# ── 에디터 ────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*~
+
+# ── 심볼릭 링크 (절대경로라 다른 PC 에서 깨짐) ────────────────
+# src/morai_msgs, src/CMakeLists.txt 는 auto_ws 를 가리키는 링크.
+# 커밋하지 않고, 각 PC 에서 다시 만든다 (README/SETUP 참고).
+src/morai_msgs
+src/CMakeLists.txt
+
+# ── 스크래치 ──────────────────────────────────────────────────
+scratch/
+tmp/
+*.tmp
