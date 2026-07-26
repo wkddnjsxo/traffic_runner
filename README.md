@@ -140,19 +140,19 @@ cd train
 
 ### 3-B. RTX 40 시리즈 — Docker 없이 로컬 실행
 
-Ada(sm_89)는 일반 torch 휠로 되므로 컨테이너가 필요 없다. venv 하나로 끝.
+Ada(sm_89)는 일반 torch 휠로 되므로 **컨테이너도 venv 도 필요 없다.**
+WSL 기본 Python 3.8 에 torch 만 깔면 끝.
 
 ```bash
-# 1) 가상환경 + torch(cu124) + 의존성
-python3 -m venv ~/tl_env && source ~/tl_env/bin/activate
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
-pip install -r ~/traffic_runner/train/requirements.txt
+# 1) torch(cu121) + 의존성 — WSL python3 에 바로 설치 (이미 있으면 생략)
+pip install --user torch torchvision --index-url https://download.pytorch.org/whl/cu121
+pip install --user -r ~/traffic_runner/train/requirements.txt
 
-# 2) GPU 확인 (sm_89, 커널 정상?)
+# 2) GPU 확인 (sm_89, 커널 정상?)  → (8, 9) 와 matmul 값이 나오면 정상
 python3 -c "import torch; print(torch.__version__, torch.cuda.get_device_name(0),
             torch.cuda.get_device_capability(0)); print(float((torch.randn(999,999,device='cuda')**2).sum()))"
 
-# 3) 데이터/출력 경로를 로컬로 지정 (컨테이너 기본값이 /workspace 라 필수)
+# 3) 데이터/출력 경로를 로컬로 지정 (train.py 기본값이 컨테이너용 /workspace 라 필수)
 cd ~/traffic_runner/train
 export TR_DATA=~/traffic_runner/dataset
 export TR_OUT=~/traffic_runner/train/runs
@@ -162,8 +162,8 @@ python3 check_dataset.py
 python3 train.py --epochs 3 --size 384 --batch 48 --lr 2e-4
 ```
 
-> Python 3.8(WSL 기본)이면 torch 가 2.4.x 로 고정된다(40 시리즈는 문제없음).
-> 더 최신 torch 를 원하면 conda/venv 로 Python 3.10+ 를 쓸 것.
+> Ada(sm_89)는 cu118 이상이면 되므로 cu121 휠로 충분(cu124 도 무방).
+> Python 3.8 이면 torch 2.4.x 대가 깔린다 — 40 시리즈는 문제없다.
 
 ### 공통 — 학습 팁
 
@@ -197,14 +197,13 @@ cd train
 ./run.sh serve --ckpt runs/20260725_061944/best.pt
 ```
 
-**RTX 40 시리즈 (Docker 없이 로컬)** — 3-B 의 venv 를 그대로 사용
+**RTX 40 시리즈 (Docker 없이 로컬)** — 3-B 에서 torch 만 깔면 바로
 ```bash
-source ~/tl_env/bin/activate            # 3-B 에서 만든 환경
 cd ~/traffic_runner/train
 python3 serve.py --ckpt runs/20260725_061944/best.pt
 ```
 > 서버가 어느 쪽이든 포트 5555 로 열린다. 카메라 쪽(4-B)은 동일하게 붙는다.
-> 40 시리즈는 서버·카메라가 같은 로컬 파이썬이라 Docker/컨테이너가 전혀 필요 없다.
+> 40 시리즈는 서버·카메라가 같은 WSL python3 라 Docker/컨테이너가 전혀 필요 없다.
 
 ### 4-B. 카메라 → 추론 (서버가 50/40 어느 쪽이든 동일)
 
@@ -275,11 +274,11 @@ UDP 설정은 MORAI **Sensor Setting** 의 Destination IP/Port 와 맞출 것(�
 
 1. 저장소 clone (`best.pt` 포함). 데이터셋은 안 들어있으니 재수집 불필요 —
    추론엔 `best.pt` 하나면 된다.
-2. venv + torch 설치 (3-B 의 1~2단계) → GPU sm_89·커널 정상 확인
+2. torch 설치 (3-B 의 1~2단계, venv 없이 WSL python3 에) → GPU sm_89·커널 정상 확인
 3. MORAI **Sensor Setting**: 해상도·FOV·UDP Destination IP/Port 확인 (1절)
 4. 추론 서버 (터미널 1):
    ```bash
-   source ~/tl_env/bin/activate && cd ~/traffic_runner/train
+   cd ~/traffic_runner/train
    python3 serve.py --ckpt runs/20260725_061944/best.pt
    ```
 5. 카메라 추론 (터미널 2):
