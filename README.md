@@ -106,53 +106,107 @@ dataset/
 
 ---
 
-## 3. 학습 (Docker, RTX 50/40 시리즈)
+## 3. 학습
 
-> RTX 5070(Blackwell sm_120)은 **cu128 이상 torch 필수**. 일반 휠은 커널 에러가 난다.
-> Dockerfile 이 cu128 로 빌드하고 ImageNet 가중치도 미리 받아둔다.
+> **어떤 GPU 냐에 따라 실행 경로가 다르다.**
+>
+> | GPU | 아키텍처 | 필요 torch | 실행 방법 |
+> |---|---|---|---|
+> | RTX **50** 시리즈 (5070 등) | Blackwell sm_120 | **cu128 이상** (일반 휠은 커널 에러) | **Docker 컨테이너** (3-A) |
+> | RTX **40** 시리즈 (4060/4070 Ti 등) | Ada sm_89 | 일반 휠(cu121/cu124)로 충분 | **로컬 pip 직접 실행** (3-B) — Docker 불필요 |
+>
+> 이 저장소의 `train/runs/20260725_061944/best.pt` 는 **RTX 5070 에서 학습**한
+> 최종 모델이다. **40 시리즈 팀원은 이 모델을 그대로 추론에 쓰면 되고(4-B 참고),
+> 재학습이 필요하면 아래 3-B 로 Docker 없이 학습**하면 된다.
+
+### 3-A. RTX 50 시리즈 — Docker 컨테이너
+
+Blackwell(sm_120)은 cu128 이상이 필요해 컨테이너로 환경을 고정한다.
+Dockerfile 이 cu128 로 빌드하고 ImageNet 가중치도 미리 받아둔다.
 
 ```bash
 cd train
 ./run.sh build            # 이미지 빌드 (torch 다운로드, 최초 1회 ~10분)
-./run.sh check            # ★ GPU 확인 먼저 — sm_120/sm_89 + matmul 커널 정상 확인
+./run.sh check            # ★ GPU 확인 먼저 — sm_120 + matmul 커널 정상 확인
 ./run.sh checkdata        # 데이터셋 무결성 (라벨·이미지·경로·오염 검사)
 
 # 최종 학습 (대회용, 전체 데이터)
 ./run.sh train --epochs 3 --size 384 --batch 48 --lr 2e-4
 ```
 
-`--size 384` 가 핵심 — 좌회전 화살표(green_left)가 224 에선 뭉개진다(76%→100%).
-val 은 2~3 epoch 에 수렴하므로 epoch 를 늘려도 과적합만 된다.
+> 참고: cu128 은 sm_89(40 시리즈) **하위 호환**이라, 이 컨테이너를 40 시리즈에서
+> 그대로 써도 된다(`./run.sh build/train/serve` 동일). Docker Desktop WSL 통합만
+> 켜져 있으면 됨. 다만 40 시리즈는 3-B 로컬 실행이 더 가볍다.
 
-### 검증 옵션
+### 3-B. RTX 40 시리즈 — Docker 없이 로컬 실행
+
+Ada(sm_89)는 일반 torch 휠로 되므로 컨테이너가 필요 없다. venv 하나로 끝.
+
 ```bash
-# 지점 홀드아웃: 그 지점을 통째로 val 로 → "처음 보는 교차로" 성능
-./run.sh train --epochs 3 --size 384 --batch 48 --lr 2e-4 --holdout-spots sig_005
+# 1) 가상환경 + torch(cu124) + 의존성
+python3 -m venv ~/tl_env && source ~/tl_env/bin/activate
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+pip install -r ~/traffic_runner/train/requirements.txt
 
-# 거리 필터: 신호등 N m 이내만 학습
-./run.sh train --max-dist 40
+# 2) GPU 확인 (sm_89, 커널 정상?)
+python3 -c "import torch; print(torch.__version__, torch.cuda.get_device_name(0),
+            torch.cuda.get_device_capability(0)); print(float((torch.randn(999,999,device='cuda')**2).sum()))"
 
-# 학습 후 오류 분석 (지점×거리×클래스별)
-./run.sh analyze --ckpt runs/<시각>/best.pt --holdout-spots sig_005
+# 3) 데이터/출력 경로를 로컬로 지정 (컨테이너 기본값이 /workspace 라 필수)
+cd ~/traffic_runner/train
+export TR_DATA=~/traffic_runner/dataset
+export TR_OUT=~/traffic_runner/train/runs
+
+# 4) 데이터셋 검사 → 학습
+python3 check_dataset.py
+python3 train.py --epochs 3 --size 384 --batch 48 --lr 2e-4
 ```
 
-학습 결과는 `train/runs/<시각>/best.pt` (44MB). 리포트는 best 기준으로 나온다.
+> Python 3.8(WSL 기본)이면 torch 가 2.4.x 로 고정된다(40 시리즈는 문제없음).
+> 더 최신 torch 를 원하면 conda/venv 로 Python 3.10+ 를 쓸 것.
+
+### 공통 — 학습 팁
+
+`--size 384` 가 핵심 — 좌회전 화살표(green_left)가 224 에선 뭉개진다(76%→100%).
+val 은 2~3 epoch 에 수렴하므로 epoch 를 늘려도 과적합만 된다.
+학습 결과는 `$TR_OUT/<시각>/best.pt` (44MB). 리포트는 best 기준으로 나온다.
+
+**검증 옵션** (컨테이너는 `./run.sh train ...`, 로컬은 `python3 train.py ...`)
+```bash
+# 지점 홀드아웃: 그 지점을 통째로 val 로 → "처음 보는 교차로" 성능
+python3 train.py --epochs 3 --size 384 --batch 48 --lr 2e-4 --holdout-spots sig_005
+# 거리 필터 / 오류 분석
+python3 train.py --max-dist 40
+python3 analyze_val.py --ckpt runs/<시각>/best.pt --holdout-spots sig_005
+```
 
 ---
 
 ## 4. 실시간 추론
 
-카메라(WSL)와 모델(컨테이너)이 분리돼 있어 **TCP 로 잇는다**.
-컨테이너에서 서버를 띄우고, WSL 에서 카메라를 받아 넘긴다.
+구조: **카메라 수신(`live_infer.py`) → TCP → 추론 서버(`serve.py`)**.
+추론 서버를 먼저 띄우고, 카메라 쪽에서 프레임을 받아 넘긴다.
+GPU 전처리(리사이즈+정규화)까지 서버가 하므로 장당 ~3ms, 10Hz 에 여유 충분.
+어떤 해상도로 들어와도 서버가 384 로 맞춰 추론하므로 카메라 640×480 도 정상 동작.
 
-### 4-1. 추론 서버 (컨테이너) — 항상 먼저
+### 4-A. 추론 서버 띄우기 — GPU 에 따라
+
+**RTX 50 시리즈 (컨테이너)**
 ```bash
 cd train
 ./run.sh serve --ckpt runs/20260725_061944/best.pt
 ```
-GPU 전처리(리사이즈+정규화)까지 서버가 하므로 장당 ~3ms. 10Hz 에 여유 충분.
 
-### 4-2. 카메라 → 추론 (WSL)
+**RTX 40 시리즈 (Docker 없이 로컬)** — 3-B 의 venv 를 그대로 사용
+```bash
+source ~/tl_env/bin/activate            # 3-B 에서 만든 환경
+cd ~/traffic_runner/train
+python3 serve.py --ckpt runs/20260725_061944/best.pt
+```
+> 서버가 어느 쪽이든 포트 5555 로 열린다. 카메라 쪽(4-B)은 동일하게 붙는다.
+> 40 시리즈는 서버·카메라가 같은 로컬 파이썬이라 Docker/컨테이너가 전혀 필요 없다.
+
+### 4-B. 카메라 → 추론 (서버가 50/40 어느 쪽이든 동일)
 
 **개발용 (ROS 토픽)** — K-city 개발 중, 시뮬 정답과 비교
 ```bash
@@ -215,13 +269,26 @@ UDP 설정은 MORAI **Sensor Setting** 의 Destination IP/Port 와 맞출 것(�
 
 ---
 
-## 6. 대회 PC 이관 체크리스트
+## 6. 대회 PC 이관 체크리스트 (RTX 40 시리즈 기준)
 
-1. `train/`, `src/traffic_runner/`, `train/runs/<모델>/best.pt` 복사
-2. `cd train && ./run.sh build && ./run.sh check` — GPU(4060=sm_89) 정상 확인
+대회 PC 는 40 시리즈(Ada)이므로 **Docker 없이 로컬 실행**한다.
+
+1. 저장소 clone (`best.pt` 포함). 데이터셋은 안 들어있으니 재수집 불필요 —
+   추론엔 `best.pt` 하나면 된다.
+2. venv + torch 설치 (3-B 의 1~2단계) → GPU sm_89·커널 정상 확인
 3. MORAI **Sensor Setting**: 해상도·FOV·UDP Destination IP/Port 확인 (1절)
-4. `./run.sh serve --ckpt runs/<모델>/best.pt` (컨테이너)
-5. `python3 tools/live_infer.py --compete --udp-port <포트>` (WSL)
+4. 추론 서버 (터미널 1):
+   ```bash
+   source ~/tl_env/bin/activate && cd ~/traffic_runner/train
+   python3 serve.py --ckpt runs/20260725_061944/best.pt
+   ```
+5. 카메라 추론 (터미널 2):
+   ```bash
+   cd ~/traffic_runner/src/traffic_runner
+   python3 tools/live_infer.py --compete --udp-port <포트>
+   ```
+
+> 50 시리즈 PC 라면 4·5 를 `./run.sh serve` / 동일한 `live_infer.py` 로 대체(3-A/4-A).
 
 ---
 
