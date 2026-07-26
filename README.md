@@ -41,9 +41,9 @@ MORAI **Sensor Setting** 에서 아래대로 맞춘다.
 | **Width × Height** | **640 × 480** |
 | **Horizontal FOV** | **65** |
 | Sensor Network | **UDP** |
-| Host Sensor IP | 192.168.80.1 (Windows) |
-| Destination IP | 192.168.88.11 (WSL — 추론 돌리는 PC) |
-| **Destination Port** | **9090** |
+| Host Sensor IP | MORAI(시뮬)가 도는 PC 의 IP |
+| Destination IP | **추론을 돌리는 PC(WSL)의 IP** — 카메라가 여기로 전송됨 |
+| **Destination Port** | **9090** (추론 코드의 `--udp-port` 와 일치시킬 것) |
 
 > **해상도**: 학습 데이터는 1280×960 으로 수집했지만, 추론 파이프라인이 입력을
 > 384×512 로 리사이즈하므로 **위 640×480 설정에서도 실시간 추론이 정상 동작함(검증됨)**.
