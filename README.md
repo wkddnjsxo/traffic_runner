@@ -184,6 +184,13 @@ python3 analyze_val.py --ckpt runs/<시각>/best.pt --holdout-spots sig_005
 
 ## 4. 실시간 추론
 
+> **추론만 필요하면 [`deploy/`](deploy/) 폴더만 쓰면 된다.**
+> `deploy/` 는 학습·수집 코드와 분리된 **자기완결 추론 배포판**이다
+> (`serve.py`, `live_infer.py`, `camera_udp.py`, `model.py`, `best.pt`).
+> 팀원/대회 PC 엔 이 폴더 + best.pt 만 넘기면 되고, pandas·scikit-learn 등
+> 학습 의존성이 필요 없다. 카메라 클라이언트는 **torch 도 필요 없다**(표준 라이브러리만).
+> 사용법은 [deploy/README.md](deploy/README.md). 아래는 개발 저장소 기준 설명이다.
+
 구조: **카메라 수신(`live_infer.py`) → TCP → 추론 서버(`serve.py`)**.
 추론 서버를 먼저 띄우고, 카메라 쪽에서 프레임을 받아 넘긴다.
 GPU 전처리(리사이즈+정규화)까지 서버가 하므로 장당 ~3ms, 10Hz 에 여유 충분.
@@ -268,32 +275,31 @@ UDP 설정은 MORAI **Sensor Setting** 의 Destination IP/Port 와 맞출 것(�
 
 ---
 
-## 6. 대회 PC 이관 체크리스트 (RTX 40 시리즈 기준)
+## 6. 대회 PC 이관 (RTX 40 시리즈) — deploy 폴더만
 
-대회 PC 는 40 시리즈(Ada)이므로 **Docker 없이 로컬 실행**한다.
+대회 PC 는 40 시리즈(Ada)이므로 **Docker 없이, `deploy/` 폴더만** 넘기면 된다.
+학습·수집 코드나 데이터셋은 필요 없다.
 
-1. 저장소 clone (`best.pt` 포함). 데이터셋은 안 들어있으니 재수집 불필요 —
-   추론엔 `best.pt` 하나면 된다.
-2. torch 설치 (3-B 의 1~2단계, venv 없이 WSL python3 에) → GPU sm_89·커널 정상 확인
-3. MORAI **Sensor Setting**: 해상도·FOV·UDP Destination IP/Port 확인 (1절)
-4. 추론 서버 (터미널 1):
+1. `deploy/` 폴더 복사 (안에 `best.pt` 포함, 44MB)
+2. torch 설치 → GPU 확인
    ```bash
-   cd ~/traffic_runner/train
-   python3 serve.py --ckpt runs/20260725_061944/best.pt
+   cd deploy
+   pip install --user torch torchvision --index-url https://download.pytorch.org/whl/cu121
+   pip install --user pillow numpy
+   python3 -c "import torch; print(torch.cuda.get_device_capability(0))"   # (8,9)면 정상
    ```
-5. 카메라 추론 (터미널 2):
-   ```bash
-   cd ~/traffic_runner/src/traffic_runner
-   python3 tools/live_infer.py --compete --udp-port <포트>
-   ```
+3. MORAI **Sensor Setting**: FOV 65 / Pitch 340 / UDP Destination IP·Port 확인 (1절)
+4. 추론 서버 (터미널 1): `python3 serve.py --ckpt best.pt`
+5. 카메라 추론 (터미널 2): `python3 live_infer.py --udp-port <포트>`
 
-> 50 시리즈 PC 라면 4·5 를 `./run.sh serve` / 동일한 `live_infer.py` 로 대체(3-A/4-A).
+상세: [deploy/README.md](deploy/README.md). (개발 저장소 전체로 돌리려면 3-A/4-A 참고.)
 
 ---
 
 ## 구조
 ```
 traffic_runner/               catkin 워크스페이스 루트
+├── deploy/                   ★ 추론 배포판 (자기완결, 남에게 이것만 넘김)
 ├── capture.sh                텔레옵 캡처 실행
 ├── spots/                    지점 정의 (sig_*, unk_*)
 ├── dataset/                  수집 결과 (images/ + manifest.csv)

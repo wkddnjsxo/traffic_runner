@@ -1,0 +1,9 @@
+# 추론 서버(serve.py)용. 카메라 클라이언트(live_infer.py)는 표준 라이브러리만 쓰므로 불필요.
+#
+# GPU 에 맞는 torch 를 설치할 것:
+#   RTX 40 (Ada, sm_89):  pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#   RTX 50 (Blackwell):   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+torch
+torchvision
+pillow
+numpy

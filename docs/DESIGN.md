@@ -1,7 +1,8 @@
 # traffic_runner 설계
 
-MORAI 시뮬레이터에서 **신호등 인지 AI(ResNet18) 학습 데이터셋을 자동 수집**하는
-시나리오 러너. 학습 코드는 이 저장소에 없다 — 여기는 수집 전용이다.
+MORAI 시뮬레이터에서 **신호등 인지 AI(ResNet18)** 를 위한 **데이터셋 자동 수집
+(`src/`) → 학습(`train/`) → 실시간 추론 배포(`deploy/`)** 파이프라인.
+이 문서는 주로 수집 설계를 다루고, 추론·배포 설계는 7절에 있다.
 
 ---
 
@@ -211,7 +212,9 @@ import 가 섞이면 곤란하기 때문이다. 제조사 SDK 에만 의존한�
 
 ---
 
-## 5. 앞으로 구현할 모듈
+## 5. 구현 모듈
+
+수집(`src/`) → 학습(`train/`) → 추론 배포(`deploy/`) 세 단계 모두 구현 완료.
 
 | 모듈 | 역할 | 상태 |
 |------|------|:---:|
@@ -223,13 +226,15 @@ import 가 섞이면 곤란하기 때문이다. 제조사 SDK 에만 의존한�
 | `tools/where.py` | 현재 ego 위치·링크·신호등 조회 | ✅ |
 | `tools/capture_spot.py` | 텔레옵 지점 캡처 | ✅ |
 | `tools/spot_report.py` | 지점 검수 | ✅ |
-| `tl/controller.py` | 신호등 연출 (gRPC/ROS) + 적용 검증 | ⬜ |
-| `sim/world.py` | attach/날씨/시간/텔레포트/스폰 통합 브리지 | ⬜ |
-| `drive/pure_pursuit.py` | 경로 추종 (`/ctrl_cmd` 발행) | ⬜ |
-| `collect/objects.py` | 객체 seed → 스폰 배치 | ⬜ |
-| `collect/recorder.py` | 이미지 저장 + 매니페스트 CSV | ⬜ |
-| `collect/matrix.py` | 조합 생성 + 진행상황 저장(재개 가능) | ⬜ |
-| `collect/runner_node.py` | 메인 오케스트레이터 | ⬜ |
+| `tl/controller.py` | 신호등 연출 (gRPC/ROS) + 적용 검증 | ✅ |
+| `sim/world.py` | attach/날씨/시간/텔레포트/스폰 통합 브리지 | ✅ |
+| `drive/` 경로 추종 (pure pursuit, `/ctrl_cmd` 발행) | ✅ |
+| `collect/objects.py` | 객체 seed → 스폰 배치 | ✅ |
+| `collect/recorder.py` | 이미지 저장 + 매니페스트 CSV | ✅ |
+| `collect/matrix.py` | 조합 생성 + 진행상황 저장(재개 가능) | ✅ |
+| `collect/runner_node.py` | 메인 오케스트레이터 | ✅ |
+| `train/train.py` | ResNet18 학습 (size 384, bf16, drive 층화 split) | ✅ |
+| `deploy/` | 추론 자기완결 배포판 (7절) | ✅ |
 | `collect/transitions.py` | 신호 전환 시퀀스 | ⬜ |
 
 ### 해결됨: 신호등 ID 형식 = MGeo ID
@@ -282,3 +287,62 @@ frame_idx, dist_to_end_m, ego_x, ego_y, ego_yaw, is_transition, run_id, timestam
 ResNet18 학습은 별도 저장소에서 이 manifest 를 읽어 쓴다.
 `dist_to_end_m`(신호등까지 거리)이 있으면 "너무 멀어서 안 보이는 프레임" 을
 학습 시 걸러내거나 `unknown` 으로 재라벨링할 수 있다.
+
+---
+
+## 7. 추론 아키텍처 + 배포 분리 (deploy/)
+
+### 왜 카메라와 모델을 TCP 로 분리했나
+
+개발 환경은 **카메라(ROS/UDP)는 WSL Python 3.8**, **모델(torch)은 컨테이너**에 있다.
+WSL Python 3.8 에는 RTX 50(sm_120)용 cu128 torch 를 못 깐다(휠 없음). 그래서:
+
+```
+카메라(WSL) ──JPEG/TCP──> 추론 서버(컨테이너, GPU) ──예측──> 카메라
+```
+
+- 카메라 클라이언트는 **JPEG 를 받아 넘기기만** 하므로 torch 불필요 → 표준 라이브러리만.
+- 서버가 **GPU 전처리(리사이즈+정규화)까지** 한다. PIL CPU 리사이즈가 전체의 90%
+  를 먹어서(1280×960→384: 118ms), GPU 로 옮겨 장당 ~3ms 로 줄였다. 결과 동일
+  (확률 차이 0.0005).
+- 어떤 해상도로 들어와도 서버가 학습 해상도(384)로 리사이즈하므로, 카메라
+  640×480/1280×960 어느 쪽이든 동작.
+
+### 카메라 소스 두 가지
+
+| 소스 | 용도 | 프레임 획득 |
+|---|---|---|
+| ROS `/image_jpeg/compressed` | K-city 개발 (gRPC 정답 비교 가능) | `rospy.Subscriber` |
+| UDP (MORAI Sensor UDP) | 대회 (신호 토픽 없는 맵) | `sim/camera_udp.py` |
+
+**MORAI 카메라 UDP 프로토콜** (실측으로 확정):
+- 패킷 65000바이트 고정, `MOR` 헤더 + `IMAGE` 구조(sec/nsec/index/size/jpeg[64979]/tail).
+- 한 프레임 JPEG 가 64979 보다 크면 여러 청크로 쪼개진다.
+  `index` 는 **청크 순번**(0,1,2...), `tail` 은 `AI`(더 있음)/`EI`(끝).
+  (공식 예제의 `MI` 가 아니라 `AI` 다 — 예제만 보고 짜면 틀린다.)
+- `index==0` 을 프레임 시작, `EI` 를 끝으로 조립. 유실돼도 `index==0` 에서 복구.
+
+### deploy/ — 추론 자기완결 배포판
+
+수집·학습·추론이 한 코드베이스에 있으면, "추론만" 넘길 때 학습 코드가 딸려온다.
+`serve.py` 가 추론에 쓰는 건 `build_model`/`build_transforms`/`IMAGENET_*`/
+`resolve_ckpt`/`CLASS_NAMES` 뿐인데, `from train import ...` 한 줄이 학습 루프·
+DataLoader·pandas 까지 끌고 온다.
+
+그래서 **공유 부분(모델 정의)을 `deploy/model.py` 로 추출**하고, 추론에 필요한
+파일만 `deploy/` 에 모았다:
+
+```
+deploy/
+  model.py        CLASS_NAMES, build_model/transforms, resolve_ckpt (torch)
+  serve.py        추론 서버 (torch)
+  camera_udp.py   UDP 파서 (표준 라이브러리)
+  live_infer.py   카메라→서버 (표준 라이브러리, UDP 전용)
+  best.pt         모델
+```
+
+- 코드 중복 없음: 학습(`train/`)과 추론(`deploy/`)이 모델 정의를 각자 두지만,
+  값이 같아야 하는 건 `CLASS_NAMES` 순서·전처리뿐이라 리스크가 작다.
+  (더 엄격히 하려면 `model.py` 를 양쪽이 공유하도록 심볼릭/패키지화할 수 있다.)
+- 받는 사람은 `deploy/` + torch 만으로 추론. pandas·scikit-learn(학습용) 불필요.
+- 카메라 클라이언트는 의존성 0 (표준 라이브러리) — 아무 Python 이나 됨.
